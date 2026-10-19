@@ -218,7 +218,10 @@ export default function App() {
         onSignInWithGoogle={signInWithGoogle}
         onContinueAsGuest={() => setGuestMode(true)}
         onSupabaseAuthSuccess={() => {
-          // Requirement 9: Redirect users to dashboard
+          // Task 9 & 10: Redirect to /dashboard
+          if (typeof window !== 'undefined' && window.location.pathname !== '/dashboard') {
+            window.history.replaceState(null, document.title, '/dashboard');
+          }
           setCurrentTab('dashboard');
           loadAppData();
         }}

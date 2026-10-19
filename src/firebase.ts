@@ -39,7 +39,7 @@ export interface FirestoreErrorInfo {
 }
 
 /**
- * Standard Firestore error handler without firebase/auth dependencies.
+ * Standard Firestore error handler.
  */
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
   const errInfo: FirestoreErrorInfo = {

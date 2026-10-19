@@ -237,6 +237,18 @@ export function LoginView({
                   Authentication is powered exclusively by <strong>Supabase Auth</strong>. On Vercel, set these in <em>Settings &gt; Environment Variables</em>, or enter them below to connect immediately in your browser:
                 </p>
 
+                {supabaseStatus.isSecretKeyForbidden && (
+                  <div className="p-3 bg-rose-100 border border-rose-300 rounded-xl text-rose-900 text-[11px] space-y-1 font-semibold">
+                    <div className="flex items-center gap-1.5 font-bold text-rose-800">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>Security Notice: Secret API Key Detected in Browser</span>
+                    </div>
+                    <p className="font-normal text-rose-700">
+                      Your current <code className="bg-white/80 px-1 py-0.5 rounded">VITE_SUPABASE_ANON_KEY</code> contains a secret <code>service_role</code> key. Supabase strictly blocks service_role keys in web browsers. Please replace it below with your <strong>anon / public</strong> key (role: "anon" or <code>sb_publishable_*</code>).
+                    </p>
+                  </div>
+                )}
+
                 {supabaseStatus.configured && (
                   <div className="p-2 bg-white rounded-xl border border-indigo-100 text-[11px] space-y-1">
                     <div className="text-slate-500 font-medium">Active Project URL:</div>
