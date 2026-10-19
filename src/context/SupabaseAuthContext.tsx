@@ -140,7 +140,7 @@ export const SupabaseAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
         // Requirement 9: After email verification / login redirect to dashboard
         if (event === 'SIGNED_IN' || isEmailVerificationReturn) {
-          if (typeof window !== 'undefined' && window.location.hash) {
+          if (typeof window !== 'undefined' && (window.location.hash || window.location.search.includes('code='))) {
             window.history.replaceState(null, document.title, window.location.pathname);
           }
         }

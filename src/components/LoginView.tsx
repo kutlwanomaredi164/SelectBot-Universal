@@ -11,8 +11,18 @@ import {
   ArrowRight,
   RefreshCw,
   Send,
+  Database,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  Key,
 } from 'lucide-react';
-import { isSupabaseConfigured, getSupabaseConfigStatus } from '../services/supabaseClient';
+import {
+  isSupabaseConfigured,
+  getSupabaseConfigStatus,
+  setSupabaseCustomCredentials,
+  clearSupabaseCustomCredentials,
+} from '../services/supabaseClient';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
 
 interface LoginViewProps {
@@ -46,9 +56,17 @@ export function LoginView({
   const [needsVerificationNotice, setNeedsVerificationNotice] = useState(false);
   const [resendingEmail, setResendingEmail] = useState(false);
   const [resendSuccess, setResendSuccess] = useState(false);
-  const [showConfigHelper, setShowConfigHelper] = useState(!isSupabaseConfigured);
 
-  // Email/Password Submit Handler
+  // Manual Credentials Configuration Drawer
+  const [showConfigDrawer, setShowConfigDrawer] = useState(!isSupabaseConfigured);
+  const [customUrl, setCustomUrl] = useState('');
+  const [customKey, setCustomKey] = useState('');
+  const [configSaving, setConfigSaving] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
+
+  const supabaseStatus = getSupabaseConfigStatus();
+
+  // Email/Password Submit Handler (100% Supabase Auth)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -59,8 +77,9 @@ export function LoginView({
 
     try {
       if (!isSupabaseConfigured) {
+        setShowConfigDrawer(true);
         throw new Error(
-          'Supabase environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY) are not set yet. You can explore as Guest or configure your project in .env.example.'
+          'Supabase credentials are required. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel settings, or enter them in the configuration box below.'
         );
       }
 
@@ -69,8 +88,7 @@ export function LoginView({
           throw new Error('Please provide your name and business name.');
         }
 
-        // Requirement 4: supabase.auth.signUp()
-        // Requirement 8: Keep email verification enabled
+        // Supabase signUp with email verification
         const res = await signUp(
           email.trim(),
           password,
@@ -81,17 +99,16 @@ export function LoginView({
         if (res.needsEmailVerification) {
           setNeedsVerificationNotice(true);
           setSuccessMsg(
-            `Verification email sent to ${email.trim()}! Please check your inbox and click the verification link to activate your account and access your dashboard.`
+            `Verification email sent to ${email.trim()}! Please check your inbox and click the verification link to activate your account.`
           );
         } else {
           setSuccessMsg('Account created successfully! Redirecting to dashboard...');
           if (onSupabaseAuthSuccess) onSupabaseAuthSuccess();
         }
       } else if (mode === 'signin') {
-        // Requirement 5: supabase.auth.signInWithPassword()
+        // Supabase signInWithPassword
         await signIn(email.trim(), password);
         setSuccessMsg('Signed in successfully! Redirecting to dashboard...');
-        // Requirement 9: Redirect users to dashboard
         if (onSupabaseAuthSuccess) onSupabaseAuthSuccess();
       } else if (mode === 'forgot') {
         await resetPassword(email.trim());
@@ -102,6 +119,11 @@ export function LoginView({
       if (msg.toLowerCase().includes('email not confirmed') || msg.toLowerCase().includes('not confirmed')) {
         setNeedsVerificationNotice(true);
         setAuthError('Your email address has not been confirmed yet. Please verify your email before logging in.');
+      } else if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+        setAuthError(
+          `Connection error: Unable to reach your Supabase instance. Please ensure your project is active in the Supabase Dashboard and check your Supabase credentials below.`
+        );
+        setShowConfigDrawer(true);
       } else {
         setAuthError(msg);
       }
@@ -110,11 +132,16 @@ export function LoginView({
     }
   };
 
-  // Google OAuth Handler (Requirement 11: eliminates Firebase unauthorized domain dependency)
+  // Google OAuth Login via Supabase (Zero Firebase)
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setAuthError(null);
     try {
+      if (!isSupabaseConfigured) {
+        setShowConfigDrawer(true);
+        throw new Error('Please configure Supabase credentials before using Google Sign-In.');
+      }
+
       if (onSignInWithGoogle) {
         await onSignInWithGoogle();
       } else {
@@ -122,7 +149,8 @@ export function LoginView({
       }
       if (onSupabaseAuthSuccess) onSupabaseAuthSuccess();
     } catch (err: any) {
-      setAuthError(err?.message || 'Failed to complete Google Sign-In.');
+      const msg = err?.message || 'Failed to complete Google Sign-In.';
+      setAuthError(msg);
     } finally {
       setLoading(false);
     }
@@ -146,6 +174,23 @@ export function LoginView({
     }
   };
 
+  // Save Custom Supabase Credentials
+  const handleSaveCustomCredentials = (e: React.FormEvent) => {
+    e.preventDefault();
+    setConfigSaving(true);
+    setConfigError(null);
+
+    try {
+      if (!customUrl.trim() || !customKey.trim()) {
+        throw new Error('Both Supabase Project URL and Anon Key are required.');
+      }
+      setSupabaseCustomCredentials(customUrl.trim(), customKey.trim());
+    } catch (err: any) {
+      setConfigError(err?.message || 'Failed to save Supabase credentials.');
+      setConfigSaving(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-10 sm:px-6 lg:px-8 font-sans">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
@@ -155,35 +200,103 @@ export function LoginView({
         </div>
         <h2 className="text-2xl font-black text-slate-900 tracking-tight">SelectBot SaaS</h2>
         <p className="mt-1 text-xs text-slate-500 font-medium">
-          Universal No-Code Chatbot Platform & Supabase SaaS Engine
+          Universal No-Code Chatbot Platform & 100% Supabase Auth Engine
         </p>
       </div>
 
       <div className="mt-6 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white py-8 px-6 shadow-sm border border-slate-200 rounded-3xl sm:px-8 space-y-5">
-          {/* Supabase Status Banner (if pending env vars) */}
-          {!isSupabaseConfigured && (
-            <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-2xl text-xs space-y-1.5">
-              <div className="flex items-center justify-between text-indigo-900 font-bold">
-                <span className="flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-indigo-600" />
-                  Supabase Central Project Setup
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowConfigHelper(!showConfigHelper)}
-                  className="text-[11px] text-indigo-600 hover:text-indigo-800 underline cursor-pointer"
-                >
-                  {showConfigHelper ? 'Hide guide' : 'Setup guide'}
-                </button>
+          {/* Supabase Status / Configuration Drawer */}
+          <div className="border border-indigo-100 bg-indigo-50/60 rounded-2xl overflow-hidden transition-all text-xs">
+            <div
+              onClick={() => setShowConfigDrawer(!showConfigDrawer)}
+              className="p-3.5 flex items-center justify-between cursor-pointer hover:bg-indigo-50 transition-colors"
+            >
+              <div className="flex items-center gap-2 font-bold text-indigo-950">
+                <Database className="w-4 h-4 text-indigo-600" />
+                <span>Supabase Auth Engine</span>
+                {supabaseStatus.configured ? (
+                  <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-200">
+                    Connected
+                  </span>
+                ) : (
+                  <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-amber-200">
+                    Setup Required
+                  </span>
+                )}
               </div>
-              <p className="text-[11px] text-indigo-700 leading-relaxed">
-                Connect your central Supabase project via environment variables (
-                <code className="bg-white/80 px-1 py-0.5 rounded text-[10px]">VITE_SUPABASE_URL</code>).
-                You can also explore instantly via Guest Mode below!
-              </p>
+              <div className="flex items-center gap-1 text-[11px] text-indigo-600 font-semibold">
+                <span>{showConfigDrawer ? 'Hide settings' : 'Configure'}</span>
+                {showConfigDrawer ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              </div>
             </div>
-          )}
+
+            {showConfigDrawer && (
+              <div className="px-3.5 pb-3.5 border-t border-indigo-100 pt-2.5 space-y-3">
+                <p className="text-[11px] text-indigo-800 leading-relaxed">
+                  Authentication is powered exclusively by <strong>Supabase Auth</strong>. On Vercel, set these in <em>Settings &gt; Environment Variables</em>, or enter them below to connect immediately in your browser:
+                </p>
+
+                {supabaseStatus.configured && (
+                  <div className="p-2 bg-white rounded-xl border border-indigo-100 text-[11px] space-y-1">
+                    <div className="text-slate-500 font-medium">Active Project URL:</div>
+                    <code className="text-indigo-700 font-mono text-[10px] break-all block">{supabaseStatus.url}</code>
+                    {supabaseStatus.isCustomStored && (
+                      <button
+                        type="button"
+                        onClick={clearSupabaseCustomCredentials}
+                        className="mt-1 text-[10px] text-rose-600 hover:text-rose-800 underline font-semibold cursor-pointer"
+                      >
+                        Reset stored credentials
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                <form onSubmit={handleSaveCustomCredentials} className="space-y-2">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
+                      VITE_SUPABASE_URL
+                    </label>
+                    <input
+                      type="url"
+                      required
+                      placeholder="https://xyzcompany.supabase.co"
+                      value={customUrl}
+                      onChange={(e) => setCustomUrl(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-white text-xs rounded-lg border border-slate-300 font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
+                      VITE_SUPABASE_ANON_KEY
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      placeholder="eyJhbGciOiJIUzI1NiIsIn..."
+                      value={customKey}
+                      onChange={(e) => setCustomKey(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-white text-xs rounded-lg border border-slate-300 font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  {configError && (
+                    <div className="text-[11px] text-rose-600 font-semibold">{configError}</div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={configSaving}
+                    className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow-xs transition-colors cursor-pointer"
+                  >
+                    {configSaving ? 'Saving...' : 'Save & Connect Supabase'}
+                  </button>
+                </form>
+              </div>
+            )}
+          </div>
 
           {/* Form Tabs: Sign In / Create Account */}
           <div className="flex border-b border-slate-200 text-xs font-bold text-center">
@@ -280,7 +393,7 @@ export function LoginView({
             </div>
           )}
 
-          {/* Primary Email / Password Form */}
+          {/* Primary Email / Password Form (Supabase Auth) */}
           <form onSubmit={handleSubmit} className="space-y-3.5 text-xs">
             {mode === 'signup' && (
               <>
@@ -365,16 +478,16 @@ export function LoginView({
               className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-xs transition-colors cursor-pointer disabled:opacity-50 mt-2"
             >
               {loading
-                ? 'Processing...'
+                ? 'Connecting to Supabase...'
                 : mode === 'signup'
-                ? 'Create Account (Email Verification Enabled)'
+                ? 'Create Customer Account (Supabase Auth)'
                 : mode === 'forgot'
                 ? 'Send Reset Instructions'
-                : 'Sign In to Dashboard'}
+                : 'Sign In to Dashboard (Supabase Auth)'}
             </button>
           </form>
 
-          {/* Social / Google Sign In via Supabase OAuth */}
+          {/* Social / Google Sign In via Supabase OAuth (Zero Firebase) */}
           <div className="relative pt-1">
             <div className="absolute inset-0 flex items-center">
               <div className="w-full border-t border-slate-200" />
@@ -388,6 +501,7 @@ export function LoginView({
             onClick={handleGoogleSignIn}
             disabled={loading}
             className="w-full flex items-center justify-center gap-3 px-4 py-2.5 border border-slate-300 rounded-xl shadow-xs bg-white text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50"
+            title="Sign in using Google OAuth via Supabase (Zero Firebase)"
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24">
               <path
@@ -407,7 +521,7 @@ export function LoginView({
                 d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
               />
             </svg>
-            <span>Continue with Google</span>
+            <span>Continue with Google (Supabase OAuth)</span>
           </button>
 
           {/* Secondary Action: Demo / Guest Access */}

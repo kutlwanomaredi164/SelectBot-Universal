@@ -1,4 +1,4 @@
-import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { supabase, isSupabaseConfigured, getSupabaseConfigStatus } from './supabaseClient';
 import { User, Session } from '@supabase/supabase-js';
 import { UserProfile } from '../types';
 
@@ -9,6 +9,18 @@ export interface AuthResponse {
   error?: string;
 }
 
+/**
+ * Returns the exact absolute URL to redirect back to after email confirmation or OAuth.
+ * Ensures compatibility with https://select-bot-universal-8bxn-5ic3awrub-wan0.vercel.app
+ */
+export function getAuthRedirectUrl(): string {
+  if (typeof window !== 'undefined' && window.location && window.location.origin) {
+    const origin = window.location.origin.replace(/\/$/, '');
+    return `${origin}/`;
+  }
+  return 'https://select-bot-universal-8bxn-5ic3awrub-wan0.vercel.app/';
+}
+
 export const supabaseAuthService = {
   isConfigured: isSupabaseConfigured,
 
@@ -17,12 +29,17 @@ export const supabaseAuthService = {
    */
   async getSession(): Promise<Session | null> {
     if (!isSupabaseConfigured) return null;
-    const { data, error } = await supabase.auth.getSession();
-    if (error) {
-      console.warn('Supabase getSession error:', error.message);
+    try {
+      const { data, error } = await supabase.auth.getSession();
+      if (error) {
+        console.warn('Supabase getSession error:', error.message);
+        return null;
+      }
+      return data.session;
+    } catch (err) {
+      console.warn('Supabase getSession network notice:', err);
       return null;
     }
-    return data.session;
   },
 
   /**
@@ -34,7 +51,6 @@ export const supabaseAuthService = {
     try {
       const { data, error } = await supabase.auth.getUser();
       if (error) {
-        // Return null quietly if not authenticated
         return null;
       }
       return data.user;
@@ -55,31 +71,43 @@ export const supabaseAuthService = {
     displayName: string,
     businessName: string
   ): Promise<AuthResponse> {
-    if (!isSupabaseConfigured) {
+    const status = getSupabaseConfigStatus();
+    if (!status.configured) {
       throw new Error(
-        'Supabase is not configured yet. Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment.'
+        `Supabase is not configured yet. Missing: ${status.missingVars.join(', ')}. Please configure your Supabase Project URL and Anon Key in Vercel or in the connection panel.`
       );
     }
 
     const trimmedEmail = email.trim().toLowerCase();
     const cleanDisplayName = displayName.trim() || trimmedEmail.split('@')[0];
     const cleanBusinessName = businessName.trim() || 'My Business';
+    const redirectUrl = getAuthRedirectUrl();
 
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    const redirectUrl = origin ? `${origin}/` : undefined;
-
-    const { data, error } = await supabase.auth.signUp({
-      email: trimmedEmail,
-      password,
-      options: {
-        data: {
-          display_name: cleanDisplayName,
-          business_name: cleanBusinessName,
-          full_name: cleanDisplayName,
+    let data, error;
+    try {
+      const res = await supabase.auth.signUp({
+        email: trimmedEmail,
+        password,
+        options: {
+          data: {
+            display_name: cleanDisplayName,
+            business_name: cleanBusinessName,
+            full_name: cleanDisplayName,
+          },
+          emailRedirectTo: redirectUrl,
         },
-        emailRedirectTo: redirectUrl,
-      },
-    });
+      });
+      data = res.data;
+      error = res.error;
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+        throw new Error(
+          `Unable to connect to Supabase at ${status.url || 'configured URL'}. Please verify that your Supabase project is active (not paused) and allows requests from this domain.`
+        );
+      }
+      throw err;
+    }
 
     if (error) {
       throw new Error(error.message);
@@ -107,17 +135,32 @@ export const supabaseAuthService = {
    * Automatically synchronizes the profiles table with auth.users upon successful login.
    */
   async signIn(email: string, password: string): Promise<AuthResponse> {
-    if (!isSupabaseConfigured) {
+    const status = getSupabaseConfigStatus();
+    if (!status.configured) {
       throw new Error(
-        'Supabase is not configured yet. Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.'
+        `Supabase is not configured yet. Missing: ${status.missingVars.join(', ')}. Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.`
       );
     }
 
     const trimmedEmail = email.trim().toLowerCase();
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: trimmedEmail,
-      password,
-    });
+
+    let data, error;
+    try {
+      const res = await supabase.auth.signInWithPassword({
+        email: trimmedEmail,
+        password,
+      });
+      data = res.data;
+      error = res.error;
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+        throw new Error(
+          `Unable to connect to Supabase at ${status.url || 'configured URL'}. Please verify that your Supabase project is active (not paused in Supabase Dashboard) and reachable.`
+        );
+      }
+      throw err;
+    }
 
     if (error) {
       throw new Error(error.message);
@@ -156,15 +199,16 @@ export const supabaseAuthService = {
    * Resend signup email confirmation verification link
    */
   async resendVerificationEmail(email: string): Promise<void> {
-    if (!isSupabaseConfigured) {
+    const status = getSupabaseConfigStatus();
+    if (!status.configured) {
       throw new Error('Supabase is not configured.');
     }
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const redirectUrl = getAuthRedirectUrl();
     const { error } = await supabase.auth.resend({
       type: 'signup',
       email: email.trim().toLowerCase(),
       options: {
-        emailRedirectTo: origin ? `${origin}/` : undefined,
+        emailRedirectTo: redirectUrl,
       },
     });
 
@@ -172,23 +216,51 @@ export const supabaseAuthService = {
   },
 
   /**
-   * Sign in with OAuth (Google / GitHub) via Supabase
+   * Sign in with Google OAuth via Supabase
    * Completely independent of Firebase and avoids unauthorized-domain popup blocks.
+   * Redirects cleanly to the Google authorization flow and back to the current domain.
    */
   async signInWithOAuth(provider: 'google' | 'github' = 'google') {
-    if (!isSupabaseConfigured) {
-      throw new Error('Supabase is not configured.');
+    const status = getSupabaseConfigStatus();
+    if (!status.configured) {
+      throw new Error(
+        `Supabase is not configured yet. Missing: ${status.missingVars.join(', ')}. Please configure your Supabase credentials.`
+      );
     }
 
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: {
-        redirectTo: origin ? `${origin}/` : undefined,
-      },
-    });
+    const redirectUrl = getAuthRedirectUrl();
+
+    let data, error;
+    try {
+      const res = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: redirectUrl,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          },
+        },
+      });
+      data = res.data;
+      error = res.error;
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+        throw new Error(
+          `Unable to reach Supabase OAuth endpoint at ${status.url}. Please verify your project is active and Google provider is enabled in Supabase Authentication settings.`
+        );
+      }
+      throw err;
+    }
 
     if (error) throw new Error(error.message);
+
+    // If Supabase returned an OAuth authorization URL, navigate to it immediately
+    if (typeof window !== 'undefined' && data?.url) {
+      window.location.assign(data.url);
+    }
+
     return data;
   },
 
@@ -200,9 +272,9 @@ export const supabaseAuthService = {
       throw new Error('Supabase is not configured.');
     }
 
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const redirectUrl = getAuthRedirectUrl();
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
-      redirectTo: origin ? `${origin}/` : undefined,
+      redirectTo: `${redirectUrl}reset-password`,
     });
 
     if (error) throw new Error(error.message);
@@ -277,7 +349,6 @@ export const supabaseAuthService = {
 
       if (error) {
         console.warn('Notice upserting profile in Supabase:', error.message);
-        // Return constructed profile if table insert hit RLS before user confirmed
         return {
           id: user.id,
           displayName,
