@@ -1,25 +1,22 @@
 import React, { useState } from 'react';
 import {
-  Bot,
-  ArrowRight,
   ShieldCheck,
   Zap,
-  Layers,
-  Sparkles,
   AlertCircle,
   Mail,
   Lock,
   User,
   Building,
   CheckCircle2,
-  HelpCircle,
-  ExternalLink,
+  ArrowRight,
+  RefreshCw,
+  Send,
 } from 'lucide-react';
 import { isSupabaseConfigured, getSupabaseConfigStatus } from '../services/supabaseClient';
-import { supabaseAuthService } from '../services/supabaseAuthService';
+import { useSupabaseAuth } from '../context/SupabaseAuthContext';
 
 interface LoginViewProps {
-  onSignInWithGoogle: () => Promise<void>;
+  onSignInWithGoogle?: () => Promise<void>;
   onContinueAsGuest: () => void;
   onSupabaseAuthSuccess?: () => void;
 }
@@ -29,6 +26,14 @@ export function LoginView({
   onContinueAsGuest,
   onSupabaseAuthSuccess,
 }: LoginViewProps) {
+  const {
+    signIn,
+    signUp,
+    signInWithGoogle,
+    resetPassword,
+    resendVerificationEmail,
+  } = useSupabaseAuth();
+
   const [mode, setMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -38,9 +43,10 @@ export function LoginView({
   const [loading, setLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [needsVerificationNotice, setNeedsVerificationNotice] = useState(false);
+  const [resendingEmail, setResendingEmail] = useState(false);
+  const [resendSuccess, setResendSuccess] = useState(false);
   const [showConfigHelper, setShowConfigHelper] = useState(!isSupabaseConfigured);
-
-  const supabaseStatus = getSupabaseConfigStatus();
 
   // Email/Password Submit Handler
   const handleSubmit = async (e: React.FormEvent) => {
@@ -48,11 +54,13 @@ export function LoginView({
     setLoading(true);
     setAuthError(null);
     setSuccessMsg(null);
+    setNeedsVerificationNotice(false);
+    setResendSuccess(false);
 
     try {
       if (!isSupabaseConfigured) {
         throw new Error(
-          'Supabase environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY) are not set yet. You can explore as Guest or configure your keys.'
+          'Supabase environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY) are not set yet. You can explore as Guest or configure your project in .env.example.'
         );
       }
 
@@ -60,35 +68,81 @@ export function LoginView({
         if (!displayName.trim() || !businessName.trim()) {
           throw new Error('Please provide your name and business name.');
         }
-        await supabaseAuthService.signUp(email.trim(), password, displayName.trim(), businessName.trim());
-        setSuccessMsg('Account created successfully! Check your inbox if email confirmation is enabled, or sign in.');
-        if (onSupabaseAuthSuccess) onSupabaseAuthSuccess();
+
+        // Requirement 4: supabase.auth.signUp()
+        // Requirement 8: Keep email verification enabled
+        const res = await signUp(
+          email.trim(),
+          password,
+          displayName.trim(),
+          businessName.trim()
+        );
+
+        if (res.needsEmailVerification) {
+          setNeedsVerificationNotice(true);
+          setSuccessMsg(
+            `Verification email sent to ${email.trim()}! Please check your inbox and click the verification link to activate your account and access your dashboard.`
+          );
+        } else {
+          setSuccessMsg('Account created successfully! Redirecting to dashboard...');
+          if (onSupabaseAuthSuccess) onSupabaseAuthSuccess();
+        }
       } else if (mode === 'signin') {
-        await supabaseAuthService.signIn(email.trim(), password);
+        // Requirement 5: supabase.auth.signInWithPassword()
+        await signIn(email.trim(), password);
+        setSuccessMsg('Signed in successfully! Redirecting to dashboard...');
+        // Requirement 9: Redirect users to dashboard
         if (onSupabaseAuthSuccess) onSupabaseAuthSuccess();
       } else if (mode === 'forgot') {
-        await supabaseAuthService.resetPasswordForEmail(email.trim());
-        setSuccessMsg('Password reset instructions have been sent to your email.');
+        await resetPassword(email.trim());
+        setSuccessMsg(`Password reset instructions have been sent to ${email.trim()}.`);
       }
     } catch (err: any) {
-      setAuthError(err?.message || 'Authentication failed. Please check your credentials.');
+      const msg: string = err?.message || 'Authentication failed. Please check your credentials.';
+      if (msg.toLowerCase().includes('email not confirmed') || msg.toLowerCase().includes('not confirmed')) {
+        setNeedsVerificationNotice(true);
+        setAuthError('Your email address has not been confirmed yet. Please verify your email before logging in.');
+      } else {
+        setAuthError(msg);
+      }
     } finally {
       setLoading(false);
     }
   };
 
+  // Google OAuth Handler (Requirement 11: eliminates Firebase unauthorized domain dependency)
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setAuthError(null);
     try {
-      await onSignInWithGoogle();
+      if (onSignInWithGoogle) {
+        await onSignInWithGoogle();
+      } else {
+        await signInWithGoogle();
+      }
       if (onSupabaseAuthSuccess) onSupabaseAuthSuccess();
     } catch (err: any) {
-      if (err?.code !== 'auth/popup-closed-by-user') {
-        setAuthError(err?.message || 'Failed to complete Google Sign-In.');
-      }
+      setAuthError(err?.message || 'Failed to complete Google Sign-In.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Resend Verification Email Handler
+  const handleResendVerification = async () => {
+    if (!email.trim()) {
+      setAuthError('Please enter your email address to resend verification.');
+      return;
+    }
+    setResendingEmail(true);
+    try {
+      await resendVerificationEmail(email.trim());
+      setResendSuccess(true);
+      setSuccessMsg(`A fresh verification link has been sent to ${email.trim()}. Please check your inbox.`);
+    } catch (err: any) {
+      setAuthError(err?.message || 'Failed to resend verification email.');
+    } finally {
+      setResendingEmail(false);
     }
   };
 
@@ -139,6 +193,7 @@ export function LoginView({
                 setMode('signin');
                 setAuthError(null);
                 setSuccessMsg(null);
+                setNeedsVerificationNotice(false);
               }}
               className={`flex-1 pb-3 cursor-pointer transition-colors ${
                 mode === 'signin'
@@ -154,6 +209,7 @@ export function LoginView({
                 setMode('signup');
                 setAuthError(null);
                 setSuccessMsg(null);
+                setNeedsVerificationNotice(false);
               }}
               className={`flex-1 pb-3 cursor-pointer transition-colors ${
                 mode === 'signup'
@@ -165,18 +221,62 @@ export function LoginView({
             </button>
           </div>
 
-          {/* Messages */}
+          {/* Messages & Verification Notice */}
           {authError && (
             <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-start gap-2">
               <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-              <span>{authError}</span>
+              <div className="flex-1">
+                <span>{authError}</span>
+                {needsVerificationNotice && (
+                  <button
+                    type="button"
+                    onClick={handleResendVerification}
+                    disabled={resendingEmail}
+                    className="mt-2 text-indigo-600 hover:text-indigo-800 font-bold underline flex items-center gap-1 cursor-pointer"
+                  >
+                    {resendingEmail ? (
+                      <>
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                        <span>Sending link...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-3 h-3" />
+                        <span>Resend verification email</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
           {successMsg && (
             <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-start gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-              <span>{successMsg}</span>
+              <div className="flex-1">
+                <p>{successMsg}</p>
+                {needsVerificationNotice && !resendSuccess && (
+                  <button
+                    type="button"
+                    onClick={handleResendVerification}
+                    disabled={resendingEmail}
+                    className="mt-2 text-emerald-800 hover:text-emerald-950 font-bold underline flex items-center gap-1 cursor-pointer"
+                  >
+                    {resendingEmail ? (
+                      <>
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                        <span>Resending link...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-3 h-3" />
+                        <span>Didn't receive it? Click to resend</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -267,14 +367,14 @@ export function LoginView({
               {loading
                 ? 'Processing...'
                 : mode === 'signup'
-                ? 'Create Customer Account'
+                ? 'Create Account (Email Verification Enabled)'
                 : mode === 'forgot'
                 ? 'Send Reset Instructions'
                 : 'Sign In to Dashboard'}
             </button>
           </form>
 
-          {/* Social / Google Sign In */}
+          {/* Social / Google Sign In via Supabase OAuth */}
           <div className="relative pt-1">
             <div className="absolute inset-0 flex items-center">
               <div className="w-full border-t border-slate-200" />
@@ -323,7 +423,7 @@ export function LoginView({
           <div className="pt-3 border-t border-slate-100 space-y-2 text-[11px] text-slate-500">
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-              <span>Multi-tenant Row Level Security (RLS) active</span>
+              <span>Multi-tenant Supabase RLS & Profiles synchronization active</span>
             </div>
             <div className="flex items-center gap-2">
               <Zap className="w-3.5 h-3.5 text-amber-500 shrink-0" />

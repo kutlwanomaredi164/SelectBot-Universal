@@ -1,29 +1,16 @@
 import { initializeApp } from 'firebase/app';
 import {
-  getAuth,
-  GoogleAuthProvider,
-  signInWithPopup,
-  signOut as firebaseSignOut,
-  onAuthStateChanged,
-  User as FirebaseUser,
-} from 'firebase/auth';
-import {
   getFirestore,
   doc,
   getDocFromServer,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
-// Initialize Firebase App
+// Initialize Firebase App (for Firestore database storage)
 const app = initializeApp(firebaseConfig);
 
 // Initialize Cloud Firestore with specified database ID
-// CRITICAL: The app will break without firebaseConfig.firestoreDatabaseId
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-
-// Initialize Firebase Auth
-export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
 
 export enum OperationType {
   CREATE = 'create',
@@ -52,23 +39,18 @@ export interface FirestoreErrorInfo {
 }
 
 /**
- * Standard Firestore error handler conforming to skill requirements.
- * Throws a JSON-serialized FirestoreErrorInfo when errors occur.
+ * Standard Firestore error handler without firebase/auth dependencies.
  */
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: auth.currentUser?.uid || null,
-      email: auth.currentUser?.email || null,
-      emailVerified: auth.currentUser?.emailVerified || null,
-      isAnonymous: auth.currentUser?.isAnonymous || null,
-      tenantId: auth.currentUser?.tenantId || null,
-      providerInfo:
-        auth.currentUser?.providerData?.map((provider) => ({
-          providerId: provider.providerId,
-          email: provider.email,
-        })) || [],
+      userId: null,
+      email: null,
+      emailVerified: null,
+      isAnonymous: null,
+      tenantId: null,
+      providerInfo: [],
     },
     operationType,
     path,
@@ -78,7 +60,7 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 }
 
 /**
- * Validates connection to Firestore on boot as required by skill
+ * Validates connection to Firestore
  */
 export async function testConnection(): Promise<boolean> {
   try {
@@ -88,7 +70,6 @@ export async function testConnection(): Promise<boolean> {
     if (error instanceof Error && error.message.includes('the client is offline')) {
       console.error('Please check your Firebase configuration.');
     }
-    // Expected to not find 'test/connection' doc, but server responds (not offline)
     return true;
   }
 }
@@ -97,6 +78,3 @@ export async function testConnection(): Promise<boolean> {
 testConnection().catch((err) => {
   console.warn('Firebase initial connection check notice:', err?.message || err);
 });
-
-export { signInWithPopup, firebaseSignOut, onAuthStateChanged };
-export type { FirebaseUser };

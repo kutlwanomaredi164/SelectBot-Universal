@@ -11,19 +11,15 @@ import { AppearanceView } from './components/AppearanceView';
 import { DeploymentView } from './components/DeploymentView';
 import { AnalyticsView } from './components/AnalyticsView';
 import { CreateBotModal } from './components/CreateBotModal';
-import { ChatPreview } from './components/ChatPreview';
 import { LoginView } from './components/LoginView';
 import { StandaloneChatPage } from './components/StandaloneChatPage';
 import { PublicWidgetShowcase } from './components/PublicWidgetShowcase';
 import { SupabaseMigrationModal } from './components/SupabaseMigrationModal';
 import { ChevronDown, AlertCircle, RefreshCw } from 'lucide-react';
 
-import { useFirebaseAuth } from './context/FirebaseAuthContext';
 import { useSupabaseAuth } from './context/SupabaseAuthContext';
-import { firestoreSync } from './services/firestoreSync';
-import { firebaseAuthService } from './services/firebaseAuthService';
 import { supabaseDataService } from './services/supabaseDataService';
-import { isSupabaseConfigured } from './services/supabaseClient';
+import { getGuestSession } from './utils/defaults';
 
 export default function App() {
   // -------------------------------------------------------------
@@ -76,11 +72,15 @@ export default function App() {
   }
 
   // -------------------------------------------------------------
-  // PROTECTED OWNER DASHBOARD (Requires Authentication)
+  // PROTECTED OWNER DASHBOARD (Supabase Authentication Engine)
   // Only accessed on / and internal management routes
   // -------------------------------------------------------------
-  const { user: firebaseUser, loading: fbLoading, signInWithGoogle } = useFirebaseAuth();
-  const { user: supabaseUser, profile: supabaseProfile, loading: sbLoading } = useSupabaseAuth();
+  const {
+    user: supabaseUser,
+    profile: supabaseProfile,
+    loading: sbLoading,
+    signInWithGoogle,
+  } = useSupabaseAuth();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -98,12 +98,12 @@ export default function App() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
 
-  // Determine active authenticated user across Supabase and Firebase
-  const activeUser = supabaseUser || firebaseUser;
-  const activeUserId = supabaseUser?.id || firebaseUser?.uid;
-  const authLoading = sbLoading || fbLoading;
+  // Authenticated user state exclusively powered by Supabase Auth
+  const activeUser = supabaseUser;
+  const activeUserId = supabaseUser?.id;
+  const authLoading = sbLoading;
 
-  // Load App Data from Supabase / Firebase / Local
+  // Load App Data from Supabase
   const loadAppData = useCallback(async () => {
     try {
       setLoading(true);
@@ -137,23 +137,11 @@ export default function App() {
         // Fetch analytics
         const a = await api.getAnalytics();
         setAnalytics(a);
-      } else if (firebaseUser) {
-        // Authenticated via Firebase
-        const session = await firebaseAuthService.initUserSession(firebaseUser);
-        setWorkspaces(session.workspaces);
-        const activeWs = session.currentWorkspace || session.workspaces[0];
-        setCurrentWorkspace(activeWs);
-        setBots(session.bots);
-
-        if (session.bots.length > 0) {
-          setActiveBotId((prev) => (prev && session.bots.some((b) => b.id === prev) ? prev : session.bots[0].id));
-        }
-        setAnalytics(session.analytics);
       } else if (guestMode) {
-        // Guest mode fallback
-        const session = firebaseAuthService.getGuestSession();
+        // Guest mode preview
+        const session = getGuestSession();
         setWorkspaces(session.workspaces);
-        setCurrentWorkspace(session.currentWorkspace || session.workspaces[0]);
+        setCurrentWorkspace(session.currentWorkspace);
         setBots(session.bots);
         if (session.bots.length > 0) {
           setActiveBotId(session.bots[0].id);
@@ -166,7 +154,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [supabaseUser, supabaseProfile, firebaseUser, guestMode]);
+  }, [supabaseUser, supabaseProfile, guestMode]);
 
   // Main bootstrap sequence for Owner Dashboard
   useEffect(() => {
@@ -181,19 +169,13 @@ export default function App() {
     }
   }, [authLoading, activeUser, guestMode, loadAppData]);
 
-  // Update a single bot in state & sync to Supabase / Firestore
+  // Update a single bot in state & sync to Supabase
   const handleUpdateBot = (updated: ChatbotConfig) => {
     setBots((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
 
     if (supabaseUser) {
       supabaseDataService.saveBot(updated, supabaseUser.id).catch((e) => {
         console.warn('Supabase bot sync notice:', e);
-      });
-    }
-
-    if (firebaseUser) {
-      firestoreSync.saveChatbot(updated, firebaseUser.uid).catch((e) => {
-        console.warn('Firestore bot sync notice:', e);
       });
     }
 
@@ -207,9 +189,6 @@ export default function App() {
 
     if (supabaseUser) {
       supabaseDataService.saveBot(newBot, supabaseUser.id).catch(console.warn);
-    }
-    if (firebaseUser) {
-      firestoreSync.saveChatbot(newBot, firebaseUser.uid).catch(console.warn);
     }
 
     api.getAnalytics().then(setAnalytics).catch(console.error);
@@ -238,7 +217,11 @@ export default function App() {
       <LoginView
         onSignInWithGoogle={signInWithGoogle}
         onContinueAsGuest={() => setGuestMode(true)}
-        onSupabaseAuthSuccess={() => loadAppData()}
+        onSupabaseAuthSuccess={() => {
+          // Requirement 9: Redirect users to dashboard
+          setCurrentTab('dashboard');
+          loadAppData();
+        }}
       />
     );
   }

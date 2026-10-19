@@ -123,25 +123,29 @@ CREATE INDEX IF NOT EXISTS idx_messages_conv ON public.messages(conversation_id)
 CREATE INDEX IF NOT EXISTS idx_messages_created_at ON public.messages(created_at ASC);
 
 -- ------------------------------------------------------------------------------
--- AUTOMATIC PROFILE CREATION TRIGGER ON USER SIGNUP
+-- AUTOMATIC PROFILE SYNCHRONIZATION TRIGGER WITH AUTH.USERS
 -- ------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger AS $$
 BEGIN
-  INSERT INTO public.profiles (id, display_name, business_name)
+  INSERT INTO public.profiles (id, display_name, business_name, updated_at)
   VALUES (
     NEW.id,
     COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'display_name', split_part(NEW.email, '@', 1)),
-    COALESCE(NEW.raw_user_meta_data->>'business_name', 'My Business')
+    COALESCE(NEW.raw_user_meta_data->>'business_name', 'My Business'),
+    timezone('utc'::text, now())
   )
-  ON CONFLICT (id) DO NOTHING;
+  ON CONFLICT (id) DO UPDATE SET
+    display_name = COALESCE(EXCLUDED.display_name, public.profiles.display_name),
+    business_name = COALESCE(EXCLUDED.business_name, public.profiles.business_name),
+    updated_at = timezone('utc'::text, now());
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
-  AFTER INSERT ON auth.users
+  AFTER INSERT OR UPDATE ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- ------------------------------------------------------------------------------
