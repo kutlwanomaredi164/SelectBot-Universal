@@ -9,16 +9,28 @@ export interface AuthResponse {
   error?: string;
 }
 
+export const VERCEL_PRODUCTION_URL = 'https://select-bot-universal-8bxn-5ic3awrub-wan0.vercel.app';
+
 /**
- * Returns the exact absolute URL to redirect back to after email confirmation or OAuth.
- * Strictly configured for /dashboard and compatible with https://select-bot-universal-8bxn-5ic3awrub-wan0.vercel.app
+ * Returns the exact absolute URL to redirect back to after email confirmation or OAuth (Tasks 8, 9, 10).
+ * Production verification emails must redirect to https://select-bot-universal-8bxn-5ic3awrub-wan0.vercel.app
+ * CRITICAL: Under NO circumstances return localhost or 127.0.0.1 URLs which cause ERR_CONNECTION_REFUSED.
  */
 export function getSupabaseRedirectUrl(): string {
   if (typeof window !== 'undefined' && window.location && window.location.origin) {
     const origin = window.location.origin.replace(/\/$/, '');
-    return `${origin}/dashboard`;
+    const hostname = window.location.hostname || '';
+    // Exclude localhost, 127.0.0.1, and private IPs
+    if (
+      !hostname.includes('localhost') &&
+      !hostname.includes('127.0.0.1') &&
+      hostname.includes('.') &&
+      !hostname.endsWith('.internal')
+    ) {
+      return origin;
+    }
   }
-  return 'https://select-bot-universal-8bxn-5ic3awrub-wan0.vercel.app/dashboard';
+  return VERCEL_PRODUCTION_URL;
 }
 
 export const supabaseAuthService = {

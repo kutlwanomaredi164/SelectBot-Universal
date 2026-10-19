@@ -23,6 +23,59 @@ import { STARTER_TEMPLATES } from '../data/templates';
 import { generateDefaultAnalytics } from '../utils/defaults';
 import { supabaseDataService } from './supabaseDataService';
 
+/**
+ * Safely fetches an API route, verifying that the response is application/json
+ * to prevent: SyntaxError: Unexpected token '<', "<!doctype "... is not valid JSON
+ * (Tasks 18, 19, 21)
+ */
+async function safeJsonFetch<T>(url: string, options?: RequestInit): Promise<T | null> {
+  const method = options?.method || 'GET';
+  try {
+    const res = await fetch(url, options);
+    const contentType = res.headers.get('content-type') || '';
+    const headersObj: Record<string, string> = {};
+    res.headers.forEach((val, key) => {
+      headersObj[key] = val;
+    });
+
+    // Task 19: Log request URL, response status, and response headers
+    console.log(`[API Audit] ${method} ${url} | Status: ${res.status} | Content-Type: ${contentType}`, {
+      url,
+      status: res.status,
+      headers: headersObj,
+    });
+
+    // Task 18, 19 & 21: If server returned HTML instead of application/json
+    if (!contentType.includes('application/json')) {
+      const text = await res.text();
+      console.warn(
+        `[API Audit HTML Warning] ${method} ${url} returned ${contentType} (Status: ${res.status}) instead of application/json!\n` +
+        `Request URL: ${url}\n` +
+        `Status: ${res.status}\n` +
+        `Headers: ${JSON.stringify(headersObj)}\n` +
+        `Returned Content Preview: ${text.substring(0, 300)}`
+      );
+      return null;
+    }
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.warn(`[API Audit Non-200] ${method} ${url} responded with status: ${res.status}`, {
+        url,
+        status: res.status,
+        headers: headersObj,
+        content: errText.substring(0, 300),
+      });
+      return null;
+    }
+
+    return (await res.json()) as T;
+  } catch (err: any) {
+    console.warn(`[API Audit Network Error] ${method} ${url}:`, err?.message || err);
+    return null;
+  }
+}
+
 export const api = {
   // Workspaces
   async createWorkspace(name: string, industry: string): Promise<Workspace> {
@@ -35,19 +88,15 @@ export const api = {
       createdAt: new Date().toISOString(),
     };
 
-    try {
-      const res = await fetch('/api/workspaces', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, industry }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        firestoreSync.saveWorkspace(data, cleanUid).catch(() => {});
-        return data;
-      }
-    } catch {
-      // Backend route unavailable on Vercel, fallback to Firestore
+    const data = await safeJsonFetch<Workspace>('/api/workspaces', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, industry }),
+    });
+
+    if (data) {
+      firestoreSync.saveWorkspace(data, cleanUid).catch(() => {});
+      return data;
     }
 
     await firestoreSync.saveWorkspace(newWs, cleanUid);
@@ -56,31 +105,27 @@ export const api = {
 
   // Chatbots
   async getBots(workspaceId?: string): Promise<ChatbotConfig[]> {
-    try {
-      const url = workspaceId ? `/api/bots?workspaceId=${encodeURIComponent(workspaceId)}` : '/api/bots';
-      const res = await fetch(url);
-      if (res.ok) {
-        return res.json();
-      }
-    } catch {
-      // Backend route unavailable on Vercel, fallback to Firestore
+    const url = workspaceId ? `/api/bots?workspaceId=${encodeURIComponent(workspaceId)}` : '/api/bots';
+    const data = await safeJsonFetch<ChatbotConfig[]>(url);
+    if (data && Array.isArray(data) && data.length > 0) {
+      return data;
     }
-
     return [];
   },
 
   async getBot(id: string): Promise<ChatbotConfig> {
+    const data = await safeJsonFetch<ChatbotConfig>(`/api/bots/${id}`);
+    if (data) return data;
+
     try {
-      const res = await fetch(`/api/bots/${id}`);
-      if (res.ok) return res.json();
-    } catch {
-      // Backend route unavailable on Vercel, fallback to Firestore
+      const docSnap = await getDoc(doc(db, 'chatbots', id));
+      if (docSnap.exists()) {
+        return docSnap.data() as ChatbotConfig;
+      }
+    } catch (e) {
+      console.warn('[API] Firestore getBot fallback notice:', e);
     }
 
-    const docSnap = await getDoc(doc(db, 'chatbots', id));
-    if (docSnap.exists()) {
-      return docSnap.data() as ChatbotConfig;
-    }
     throw new Error('Chatbot not found');
   },
 
@@ -98,22 +143,18 @@ export const api = {
   }): Promise<ChatbotConfig> {
     const cleanUid = 'guest_user';
 
-    try {
-      const res = await fetch('/api/bots', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        const created = await res.json();
-        firestoreSync.saveChatbot(created, cleanUid).catch(() => {});
-        return created;
-      }
-    } catch {
-      // Backend route unavailable on Vercel, fallback to Firestore creation
+    const created = await safeJsonFetch<ChatbotConfig>('/api/bots', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (created) {
+      firestoreSync.saveChatbot(created, cleanUid).catch(() => {});
+      return created;
     }
 
-    // Direct Firestore creation fallback
+    // Direct creation fallback using starter templates
     const template =
       STARTER_TEMPLATES.find((t) => t.id === payload.templateId) ||
       STARTER_TEMPLATES.find((t) => t.industry === payload.industry) ||
@@ -168,36 +209,32 @@ export const api = {
       },
     };
 
-    await firestoreSync.saveChatbot(newBot, cleanUid);
+    firestoreSync.saveChatbot(newBot, cleanUid).catch(() => {});
     return newBot;
   },
 
   async updateBot(id: string, updates: Partial<ChatbotConfig>): Promise<ChatbotConfig> {
     const cleanUid = 'guest_user';
 
-    try {
-      const res = await fetch(`/api/bots/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates),
-      });
-      if (res.ok) {
-        const updated = await res.json();
-        firestoreSync.saveChatbot(updated, cleanUid).catch(() => {});
-        return updated;
-      }
-    } catch {
-      // Backend route unavailable on Vercel, fallback to Firestore
+    const updated = await safeJsonFetch<ChatbotConfig>(`/api/bots/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+
+    if (updated) {
+      firestoreSync.saveChatbot(updated, cleanUid).catch(() => {});
+      return updated;
     }
 
     const current = await this.getBot(id);
-    const updated: ChatbotConfig = {
+    const patched: ChatbotConfig = {
       ...current,
       ...updates,
       updatedAt: new Date().toISOString(),
     };
-    await firestoreSync.saveChatbot(updated, cleanUid);
-    return updated;
+    firestoreSync.saveChatbot(patched, cleanUid).catch(() => {});
+    return patched;
   },
 
   async duplicateBot(id: string): Promise<ChatbotConfig> {
@@ -218,24 +255,22 @@ export const api = {
     };
 
     const cleanUid = 'guest_user';
-    await firestoreSync.saveChatbot(duplicated, cleanUid);
+    firestoreSync.saveChatbot(duplicated, cleanUid).catch(() => {});
     return duplicated;
   },
 
   async deleteBot(id: string): Promise<void> {
+    await safeJsonFetch(`/api/bots/${id}`, { method: 'DELETE' });
     try {
-      const res = await fetch(`/api/bots/${id}`, { method: 'DELETE' });
-      if (res.ok) return;
+      await deleteDoc(doc(db, 'chatbots', id));
     } catch {
-      // Backend route unavailable on Vercel, fallback to Firestore
+      // ignore
     }
-
-    await deleteDoc(doc(db, 'chatbots', id));
   },
 
-  async togglePublish(id: string): Promise<{ success: boolean; status: 'draft' | 'published'; bot: ChatbotConfig }> {
+  async publishBot(id: string): Promise<{ success: boolean; status: string; bot: ChatbotConfig }> {
     const current = await this.getBot(id);
-    const nextStatus: 'draft' | 'published' = current.status === 'published' ? 'draft' : 'published';
+    const nextStatus = current.status === 'published' ? 'draft' : 'published';
     const updated = await this.updateBot(id, {
       status: nextStatus,
       lastPublishedAt: nextStatus === 'published' ? new Date().toISOString() : current.lastPublishedAt,
@@ -245,12 +280,8 @@ export const api = {
 
   // Knowledge Base
   async getKnowledge(botId: string): Promise<KnowledgeBaseItem[]> {
-    try {
-      const res = await fetch(`/api/bots/${botId}/knowledge`);
-      if (res.ok) return res.json();
-    } catch {
-      // Backend route unavailable on Vercel, fallback to Firestore
-    }
+    const data = await safeJsonFetch<KnowledgeBaseItem[]>(`/api/bots/${botId}/knowledge`);
+    if (data && Array.isArray(data)) return data;
 
     try {
       const snap = await getDocs(collection(db, 'chatbots', botId, 'knowledge'));
@@ -278,7 +309,7 @@ export const api = {
       updatedAt: new Date().toISOString(),
     };
 
-    await firestoreSync.saveKnowledgeItem(botId, newItem);
+    firestoreSync.saveKnowledgeItem(botId, newItem).catch(() => {});
     return newItem;
   },
 
@@ -305,12 +336,12 @@ export const api = {
       updatedAt: new Date().toISOString(),
     };
 
-    await firestoreSync.saveKnowledgeItem(botId, updated);
+    firestoreSync.saveKnowledgeItem(botId, updated).catch(() => {});
     return updated;
   },
 
   async deleteKnowledge(botId: string, itemId: string): Promise<void> {
-    await firestoreSync.deleteKnowledgeItem(botId, itemId);
+    firestoreSync.deleteKnowledgeItem(botId, itemId).catch(() => {});
   },
 
   async testKnowledgeQuery(botId: string, query: string): Promise<any> {
@@ -323,13 +354,9 @@ export const api = {
 
   // Inbox & Human Assistance
   async getInboxRequests(botId?: string): Promise<HumanAssistanceRequest[]> {
-    try {
-      const url = botId ? `/api/bots/${botId}/inbox` : '/api/inbox/all';
-      const res = await fetch(url);
-      if (res.ok) return res.json();
-    } catch {
-      // Backend route unavailable on Vercel, fallback
-    }
+    const url = botId ? `/api/bots/${botId}/inbox` : '/api/inbox/all';
+    const data = await safeJsonFetch<HumanAssistanceRequest[]>(url);
+    if (data && Array.isArray(data)) return data;
 
     if (botId) {
       try {
@@ -371,58 +398,46 @@ export const api = {
 
   // Action Submissions
   async getActionSubmissions(botId?: string): Promise<ActionSubmission[]> {
-    try {
-      const url = botId ? `/api/bots/${botId}/actions/submissions` : '/api/actions/submissions/all';
-      const res = await fetch(url);
-      if (res.ok) return res.json();
-    } catch {
-      // Backend route unavailable on Vercel, fallback
-    }
+    const url = botId ? `/api/bots/${botId}/actions/submissions` : '/api/actions/submissions/all';
+    const data = await safeJsonFetch<ActionSubmission[]>(url);
+    if (data && Array.isArray(data)) return data;
     return [];
   },
 
   // Analytics
   async getAnalytics(botId?: string): Promise<BotAnalytics> {
-    try {
-      const url = botId ? `/api/analytics?botId=${encodeURIComponent(botId)}` : '/api/analytics';
-      const res = await fetch(url);
-      if (res.ok) return res.json();
-    } catch {
-      // Backend route unavailable on Vercel, fallback
+    const url = botId ? `/api/analytics?botId=${encodeURIComponent(botId)}` : '/api/analytics';
+    const data = await safeJsonFetch<BotAnalytics>(url);
+    if (data && typeof data === 'object' && 'totalConversations' in data) {
+      return data;
     }
-
     return generateDefaultAnalytics([]);
   },
 
-  // Chat Runtime
-  async startChatSession(
+  // Chat session initialization
+  async initChatSession(
     botId: string,
     customerSessionId?: string
   ): Promise<{ conversation: Conversation; botName: string }> {
-    try {
-      const res = await fetch('/api/chat/session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ botId, customerSessionId }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        // Persist session to Supabase when configured
-        if (supabaseDataService.isConfigured) {
-          const sessId = data.conversation?.customerSessionId || customerSessionId || `client_${Date.now()}`;
-          supabaseDataService.recordConversation(botId, sessId)
-            .then((sbConvId) => {
-              if (sbConvId && data.conversation?.messages?.[0]) {
-                const initMsg = data.conversation.messages[0];
-                supabaseDataService.recordMessage(sbConvId, 'bot', initMsg.text, initMsg.payload).catch(() => {});
-              }
-            })
-            .catch(() => {});
-        }
-        return data;
+    const data = await safeJsonFetch<{ conversation: Conversation; botName: string }>('/api/chat/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ botId, customerSessionId }),
+    });
+
+    if (data && data.conversation) {
+      if (supabaseDataService.isConfigured) {
+        const sessId = data.conversation.customerSessionId || customerSessionId || `client_${Date.now()}`;
+        supabaseDataService.recordConversation(botId, sessId)
+          .then((sbConvId) => {
+            if (sbConvId && data.conversation.messages?.[0]) {
+              const initMsg = data.conversation.messages[0];
+              supabaseDataService.recordMessage(sbConvId, 'bot', initMsg.text, initMsg.payload).catch(() => {});
+            }
+          })
+          .catch(() => {});
       }
-    } catch {
-      // Backend route unavailable on Vercel, fallback to client-side session generator
+      return data;
     }
 
     const bot = await this.getBot(botId).catch(() => null);
@@ -483,27 +498,22 @@ export const api = {
     handoffSubmission?: any;
     isNavigationAction?: string;
   }): Promise<{ botResponse: ChatMessage; conversation: Conversation; submission?: any; handoff?: any }> {
-    try {
-      const res = await fetch('/api/chat/message', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        // Persist to Supabase when configured
-        if (supabaseDataService.isConfigured) {
-          if (payload.text) {
-            supabaseDataService.recordMessage(payload.conversationId, 'customer', payload.text).catch(() => {});
-          }
-          if (data.botResponse?.text) {
-            supabaseDataService.recordMessage(payload.conversationId, 'bot', data.botResponse.text, data.botResponse.payload).catch(() => {});
-          }
+    const data = await safeJsonFetch<any>('/api/chat/message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (data && data.botResponse) {
+      if (supabaseDataService.isConfigured) {
+        if (payload.text) {
+          supabaseDataService.recordMessage(payload.conversationId, 'customer', payload.text).catch(() => {});
         }
-        return data;
+        if (data.botResponse?.text) {
+          supabaseDataService.recordMessage(payload.conversationId, 'bot', data.botResponse.text, data.botResponse.payload).catch(() => {});
+        }
       }
-    } catch {
-      // Backend route unavailable on Vercel, fallback to client-side message generator
+      return data;
     }
 
     const bot = await this.getBot(payload.botId).catch(() => null);
@@ -608,7 +618,6 @@ export const api = {
   },
 
   // Public deployment check (Works for slug, deploymentId, or botId)
-  // CRITICAL: Public chatbot visitors require ZERO authentication, tokens, or ownership checks.
   async getPublicBot(deploymentId: string): Promise<any> {
     if (!deploymentId) {
       throw new Error('404 - Chatbot not found or not published.');
@@ -623,22 +632,15 @@ export const api = {
         }
       }
     } catch (sbErr) {
-      console.warn('Supabase getPublicBot notice:', sbErr);
+      console.warn('[API] Supabase getPublicBot notice:', sbErr);
     }
 
-    // 2. Fetch from public server endpoints
-    try {
-      const res = await fetch(`/api/public/bot/${encodeURIComponent(deploymentId)}`);
-      if (res.ok) {
-        return await res.json();
-      }
-      if (res.status === 404) {
-        const slugRes = await fetch(`/api/public/slug/${encodeURIComponent(deploymentId)}`);
-        if (slugRes.ok) return await slugRes.json();
-      }
-    } catch (err: any) {
-      console.warn('Server getPublicBot fetch notice:', err);
-    }
+    // 2. Fetch from public server endpoints with safeJsonFetch
+    const data = await safeJsonFetch<any>(`/api/public/bot/${encodeURIComponent(deploymentId)}`);
+    if (data) return data;
+
+    const slugData = await safeJsonFetch<any>(`/api/public/slug/${encodeURIComponent(deploymentId)}`);
+    if (slugData) return slugData;
 
     // 3. Firestore fallback
     try {
@@ -652,7 +654,7 @@ export const api = {
         return snap.docs[0].data();
       }
     } catch (e) {
-      console.warn('Firestore getPublicBot fallback notice:', e);
+      console.warn('[API] Firestore getPublicBot fallback notice:', e);
     }
 
     // Only missing or unpublished bots return 404

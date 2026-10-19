@@ -111,7 +111,13 @@ export default function App() {
 
       if (supabaseUser) {
         // Authenticated via Supabase
-        const userBots = await supabaseDataService.getUserBots(supabaseUser.id);
+        let userBots: ChatbotConfig[] = [];
+        try {
+          userBots = await supabaseDataService.getUserBots(supabaseUser.id);
+        } catch (sbErr: any) {
+          console.warn('[Dashboard] Supabase getUserBots fallback:', sbErr?.message || sbErr);
+        }
+
         const ws: Workspace = {
           id: `ws_${supabaseUser.id.substring(0, 8)}`,
           name: supabaseProfile?.businessName || (supabaseUser.user_metadata as any)?.business_name || 'My Business',
@@ -127,16 +133,25 @@ export default function App() {
           setActiveBotId((prev) => (prev && userBots.some((b) => b.id === prev) ? prev : userBots[0].id));
         } else {
           // If no bots in Supabase yet, seed from server templates
-          const starterBots = await api.getBots();
+          let starterBots: ChatbotConfig[] = [];
+          try {
+            starterBots = await api.getBots();
+          } catch (botErr) {
+            console.warn('[Dashboard] getBots fallback:', botErr);
+          }
           if (starterBots.length > 0) {
             setBots(starterBots);
             setActiveBotId(starterBots[0].id);
           }
         }
 
-        // Fetch analytics
-        const a = await api.getAnalytics();
-        setAnalytics(a);
+        // Fetch analytics safely
+        try {
+          const a = await api.getAnalytics();
+          setAnalytics(a);
+        } catch (aErr) {
+          console.warn('[Dashboard] getAnalytics fallback:', aErr);
+        }
       } else if (guestMode) {
         // Guest mode preview
         const session = getGuestSession();

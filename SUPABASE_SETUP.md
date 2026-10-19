@@ -48,7 +48,7 @@ To ensure redirects work after Google OAuth login and email verification:
    ```
    https://select-bot-universal-8bxn-5ic3awrub-wan0.vercel.app/**
    https://select-bot-universal-8bxn-5ic3awrub-wan0.vercel.app/
-   http://localhost:3000/**
+   https://select-bot-universal-8bxn-5ic3awrub-wan0.vercel.app/dashboard
    ```
 4. Click **Save**.
 

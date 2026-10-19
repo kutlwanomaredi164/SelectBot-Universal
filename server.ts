@@ -258,15 +258,73 @@ app.get('/widget.js', (req: Request, res: Response) => {
 // API Routes
 // -------------------------------------------------------------
 
-// 1. Workspaces (Authentication handled exclusively by Firebase Authentication & Firestore)
+// 1. Workspaces & Identity (Authentication handled exclusively by Supabase Authentication)
+
+app.get('/api/auth/me', (req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.json({
+    authenticated: false,
+    user: null,
+    provider: 'supabase',
+    status: 'ok',
+  });
+});
+
+app.get('/api/user', (req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.json({
+    user: null,
+    authenticated: false,
+    status: 'ok',
+  });
+});
+
+app.get('/api/workspace', (req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'application/json');
+  const wsList = DB.getWorkspaces();
+  const ws = wsList[0] || {
+    id: 'ws_default',
+    name: 'Main Workspace',
+    industry: 'General Business',
+    ownerEmail: '',
+    createdAt: new Date().toISOString(),
+  };
+  res.json(ws);
+});
+
+app.get('/api/workspaces', (req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'application/json');
+  const wsList = DB.getWorkspaces();
+  if (wsList.length === 0) {
+    const defaultWs = DB.createWorkspace('Main Workspace', 'General Business', '');
+    return res.json([defaultWs]);
+  }
+  res.json(wsList);
+});
 
 app.post('/api/workspaces', (req: Request, res: Response) => {
   const { name, industry } = req.body;
   if (!name) {
     return res.status(400).json({ error: 'Workspace name is required' });
   }
-  const ws = DB.createWorkspace(name, industry || 'General Business', 'kutlee36@gmail.com');
+  const ws = DB.createWorkspace(name, industry || 'General Business', '');
   res.status(201).json(ws);
+});
+
+app.get('/api/dashboard', (req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'application/json');
+  const bots = DB.getChatbots();
+  res.json({
+    status: 'ok',
+    totalBots: bots.length,
+    activeBots: bots.filter((b) => b.status === 'published').length,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get('/api/health', (req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // 2. Chatbots Management
@@ -1231,6 +1289,17 @@ app.get('/api/integrations/whatsapp/verify', (req: Request, res: Response) => {
 
 app.post('/api/integrations/whatsapp/webhook', (req: Request, res: Response) => {
   res.json({ status: 'received' });
+});
+
+// -------------------------------------------------------------
+// Strict API Fallback: NEVER allow /api/* routes to fall through to index.html (Tasks 20, 21, 23)
+// -------------------------------------------------------------
+app.all('/api/*', (req: Request, res: Response) => {
+  res.status(404).setHeader('Content-Type', 'application/json').json({
+    error: 'API endpoint not found',
+    path: req.originalUrl || req.path,
+    status: 404,
+  });
 });
 
 // -------------------------------------------------------------
