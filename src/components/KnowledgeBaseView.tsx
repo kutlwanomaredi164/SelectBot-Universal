@@ -43,6 +43,7 @@ export function KnowledgeBaseView({ bot }: KnowledgeBaseViewProps) {
   const [testQuery, setTestQuery] = useState('');
   const [testResult, setTestResult] = useState<any>(null);
   const [testingQuery, setTestingQuery] = useState(false);
+  const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
 
   const loadKnowledge = async () => {
     try {
@@ -111,21 +112,23 @@ export function KnowledgeBaseView({ bot }: KnowledgeBaseViewProps) {
         setItems((prev) => [created, ...prev]);
       }
       setIsModalOpen(false);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to save knowledge item', err);
-      alert('Failed to save item');
+      setKnowledgeError(err?.message || 'Failed to save knowledge item');
+      setTimeout(() => setKnowledgeError(null), 5000);
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDeleteItem = async (id: string) => {
-    if (!window.confirm('Delete this verified knowledge item?')) return;
     try {
       await api.deleteKnowledge(bot.id, id);
       setItems((prev) => prev.filter((it) => it.id !== id));
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to delete item', err);
+      setKnowledgeError(err?.message || 'Failed to delete knowledge item');
+      setTimeout(() => setKnowledgeError(null), 5000);
     }
   };
 

@@ -59,8 +59,11 @@ export function DeploymentView({ bot, onUpdateBot }: DeploymentViewProps) {
     setTimeout(() => setCopiedUrl(false), 2500);
   };
 
+  const [actionError, setActionError] = useState<string | null>(null);
+
   const handleTogglePublish = async () => {
     setPublishing(true);
+    setActionError(null);
     try {
       const nextStatus = bot.status === 'published' ? 'draft' : 'published';
       const updated = await api.updateBot(bot.id, {
@@ -68,9 +71,10 @@ export function DeploymentView({ bot, onUpdateBot }: DeploymentViewProps) {
         lastPublishedAt: nextStatus === 'published' ? new Date().toISOString() : bot.lastPublishedAt,
       });
       onUpdateBot(updated);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to toggle publish status', err);
-      alert('Could not update publication status. Please try again.');
+      setActionError(err?.message || 'Could not update publication status. Please try again.');
+      setTimeout(() => setActionError(null), 5000);
     } finally {
       setPublishing(false);
     }
@@ -78,6 +82,7 @@ export function DeploymentView({ bot, onUpdateBot }: DeploymentViewProps) {
 
   const handleToggleDeployment = async () => {
     setUpdating(true);
+    setActionError(null);
     try {
       const updated = await api.updateBot(bot.id, {
         deployment: {
@@ -86,9 +91,10 @@ export function DeploymentView({ bot, onUpdateBot }: DeploymentViewProps) {
         },
       });
       onUpdateBot(updated);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to toggle deployment', err);
-      alert('Could not update deployment status');
+      setActionError(err?.message || 'Could not update deployment status. Please try again.');
+      setTimeout(() => setActionError(null), 5000);
     } finally {
       setUpdating(false);
     }
@@ -191,6 +197,16 @@ export function DeploymentView({ bot, onUpdateBot }: DeploymentViewProps) {
       </div>
 
       {/* Warning Notice if Bot is in Draft */}
+      {actionError && (
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p className="font-bold">Deployment Action Notice</p>
+            <p className="text-rose-700 leading-relaxed">{actionError}</p>
+          </div>
+        </div>
+      )}
+
       {bot.status !== 'published' && (
         <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />

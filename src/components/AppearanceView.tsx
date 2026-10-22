@@ -9,6 +9,7 @@ import {
   Sparkles,
   Smartphone,
   Sliders,
+  AlertCircle,
 } from 'lucide-react';
 
 interface AppearanceViewProps {
@@ -29,6 +30,7 @@ export function AppearanceView({ bot, onUpdateBot }: AppearanceViewProps) {
   const [appearance, setAppearance] = useState<BotAppearance>(bot.appearance);
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const previewBot: ChatbotConfig = {
     ...bot,
@@ -38,14 +40,16 @@ export function AppearanceView({ bot, onUpdateBot }: AppearanceViewProps) {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
+    setSaveError(null);
     try {
       const updated = await api.updateBot(bot.id, { appearance });
       onUpdateBot(updated);
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 3000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to save appearance', err);
-      alert('Could not save appearance settings');
+      setSaveError(err?.message || 'Could not save appearance settings. Please try again.');
+      setTimeout(() => setSaveError(null), 5000);
     } finally {
       setSaving(false);
     }
@@ -69,6 +73,11 @@ export function AppearanceView({ bot, onUpdateBot }: AppearanceViewProps) {
         {savedSuccess && (
           <span className="text-xs font-semibold text-emerald-600 flex items-center gap-1">
             <Check className="w-4 h-4" /> Branding saved
+          </span>
+        )}
+        {saveError && (
+          <span className="text-xs font-semibold text-rose-600 flex items-center gap-1">
+            <AlertCircle className="w-4 h-4" /> {saveError}
           </span>
         )}
       </div>

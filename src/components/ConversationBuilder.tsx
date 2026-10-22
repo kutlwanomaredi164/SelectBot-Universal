@@ -73,6 +73,7 @@ export function ConversationBuilder({ bot, onUpdateBot, onRefreshAll }: Conversa
   const [devicePreview, setDevicePreview] = useState<'mobile' | 'desktop'>('mobile');
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [operationError, setOperationError] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [showPublishingControls, setShowPublishingControls] = useState(false);
@@ -125,9 +126,10 @@ export function ConversationBuilder({ bot, onUpdateBot, onRefreshAll }: Conversa
       setIsDirty(false);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to save bot', err);
-      alert('Could not save changes to bot.');
+      setOperationError(err?.message || 'Could not save changes to bot.');
+      setTimeout(() => setOperationError(null), 5000);
     } finally {
       setSaving(false);
     }
@@ -137,13 +139,15 @@ export function ConversationBuilder({ bot, onUpdateBot, onRefreshAll }: Conversa
   const handleTogglePublish = async () => {
     try {
       setPublishing(true);
+      setOperationError(null);
       const res = await api.togglePublish(currentBot.id);
       setCurrentBot(res.bot);
       onUpdateBot(res.bot);
       onRefreshAll();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to toggle publish', err);
-      alert('Could not update publish status');
+      setOperationError(err?.message || 'Could not update publish status');
+      setTimeout(() => setOperationError(null), 5000);
     } finally {
       setPublishing(false);
     }
@@ -435,6 +439,12 @@ export function ConversationBuilder({ bot, onUpdateBot, onRefreshAll }: Conversa
           {saveSuccess && (
             <span className="text-xs text-emerald-600 font-medium flex items-center gap-1">
               <Check className="w-3.5 h-3.5" /> Changes saved
+            </span>
+          )}
+
+          {operationError && (
+            <span className="text-xs text-rose-600 font-medium flex items-center gap-1 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200">
+              <AlertCircle className="w-3.5 h-3.5" /> {operationError}
             </span>
           )}
 

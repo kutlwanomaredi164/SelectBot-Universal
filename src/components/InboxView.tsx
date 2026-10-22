@@ -28,6 +28,7 @@ export function InboxView({ bots }: InboxViewProps) {
   const [sendingReply, setSendingReply] = useState(false);
   const [agentNotes, setAgentNotes] = useState('');
   const [updatingNotes, setUpdatingNotes] = useState(false);
+  const [replyError, setReplyError] = useState<string | null>(null);
 
   const loadRequests = async () => {
     try {
@@ -90,13 +91,15 @@ export function InboxView({ bots }: InboxViewProps) {
     if (!selectedRequest || !replyText.trim() || sendingReply) return;
 
     setSendingReply(true);
+    setReplyError(null);
     try {
       await api.sendAgentReply(selectedRequest.id, replyText.trim());
       setReplyText('');
       await loadRequests();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to send reply', err);
-      alert('Could not deliver agent reply');
+      setReplyError(err?.message || 'Could not deliver agent reply');
+      setTimeout(() => setReplyError(null), 5000);
     } finally {
       setSendingReply(false);
     }

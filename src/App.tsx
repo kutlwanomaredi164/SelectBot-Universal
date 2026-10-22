@@ -15,7 +15,7 @@ import { LoginView } from './components/LoginView';
 import { StandaloneChatPage } from './components/StandaloneChatPage';
 import { PublicWidgetShowcase } from './components/PublicWidgetShowcase';
 import { SupabaseMigrationModal } from './components/SupabaseMigrationModal';
-import { ChevronDown, AlertCircle, RefreshCw } from 'lucide-react';
+import { ChevronDown, AlertCircle, RefreshCw, Bot, Plus } from 'lucide-react';
 
 import { useSupabaseAuth } from './context/SupabaseAuthContext';
 import { supabaseDataService } from './services/supabaseDataService';
@@ -378,28 +378,92 @@ export default function App() {
               />
             )}
 
-            {currentTab === 'builder' && activeBot && (
-              <ConversationBuilder
-                bot={activeBot}
-                onUpdateBot={handleUpdateBot}
-                onRefreshAll={loadAppData}
-              />
+            {currentTab === 'builder' && (
+              activeBot ? (
+                <ConversationBuilder
+                  bot={activeBot}
+                  onUpdateBot={handleUpdateBot}
+                  onRefreshAll={loadAppData}
+                />
+              ) : (
+                <div className="max-w-md mx-auto my-16 p-8 bg-white rounded-xl border border-dashed border-slate-300 text-center space-y-4">
+                  <div className="w-12 h-12 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto">
+                    <Bot className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-base font-bold text-slate-800">No chatbot selected</h3>
+                  <p className="text-xs text-slate-500">Create a chatbot or select one from the dashboard to start building conversation flows.</p>
+                  <button
+                    onClick={() => setIsCreateModalOpen(true)}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 cursor-pointer shadow-xs inline-flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Create Chatbot
+                  </button>
+                </div>
+              )
             )}
 
-            {currentTab === 'knowledge' && activeBot && (
-              <KnowledgeBaseView bot={activeBot} />
+            {currentTab === 'knowledge' && (
+              activeBot ? (
+                <KnowledgeBaseView bot={activeBot} />
+              ) : (
+                <div className="max-w-md mx-auto my-16 p-8 bg-white rounded-xl border border-dashed border-slate-300 text-center space-y-4">
+                  <div className="w-12 h-12 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto">
+                    <Bot className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-base font-bold text-slate-800">No chatbot selected</h3>
+                  <p className="text-xs text-slate-500">Create a chatbot to manage business knowledge sources, documents, and FAQs.</p>
+                  <button
+                    onClick={() => setIsCreateModalOpen(true)}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 cursor-pointer shadow-xs inline-flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Create Chatbot
+                  </button>
+                </div>
+              )
             )}
 
             {currentTab === 'inbox' && <InboxView bots={bots} />}
 
             {currentTab === 'actions' && <ActionsView bots={bots} />}
 
-            {currentTab === 'appearance' && activeBot && (
-              <AppearanceView bot={activeBot} onUpdateBot={handleUpdateBot} />
+            {currentTab === 'appearance' && (
+              activeBot ? (
+                <AppearanceView bot={activeBot} onUpdateBot={handleUpdateBot} />
+              ) : (
+                <div className="max-w-md mx-auto my-16 p-8 bg-white rounded-xl border border-dashed border-slate-300 text-center space-y-4">
+                  <div className="w-12 h-12 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto">
+                    <Bot className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-base font-bold text-slate-800">No chatbot selected</h3>
+                  <p className="text-xs text-slate-500">Create a chatbot to customize branding, theme colors, and widget appearance.</p>
+                  <button
+                    onClick={() => setIsCreateModalOpen(true)}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 cursor-pointer shadow-xs inline-flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Create Chatbot
+                  </button>
+                </div>
+              )
             )}
 
-            {currentTab === 'deployment' && activeBot && (
-              <DeploymentView bot={activeBot} onUpdateBot={handleUpdateBot} />
+            {currentTab === 'deployment' && (
+              activeBot ? (
+                <DeploymentView bot={activeBot} onUpdateBot={handleUpdateBot} />
+              ) : (
+                <div className="max-w-md mx-auto my-16 p-8 bg-white rounded-xl border border-dashed border-slate-300 text-center space-y-4">
+                  <div className="w-12 h-12 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto">
+                    <Bot className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-base font-bold text-slate-800">No chatbot selected</h3>
+                  <p className="text-xs text-slate-500">Create a chatbot to generate embed codes and shareable public chat links.</p>
+                  <button
+                    onClick={() => setIsCreateModalOpen(true)}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 cursor-pointer shadow-xs inline-flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Create Chatbot
+                  </button>
+                </div>
+              )
             )}
 
             {currentTab === 'analytics' && (

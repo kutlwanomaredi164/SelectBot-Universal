@@ -310,9 +310,16 @@ export function CreateBotModal({ isOpen, workspaceId, userId, onClose, onBotCrea
         conversationStyle,
       });
 
+      // Verify created ID is present and valid
+      const targetBotId = created?.id;
+      if (!targetBotId || targetBotId === 'undefined') {
+        throw new Error('Failed to initialize chatbot record: valid ID was not returned.');
+      }
+
       // 2. Enhance with custom settings & publish status
       const updatedBot: ChatbotConfig = {
         ...created,
+        id: targetBotId,
         publicSlug: finalSlug,
         ownerId: userId,
         businessCategory: resolvedIndustry,
@@ -344,7 +351,7 @@ export function CreateBotModal({ isOpen, workspaceId, userId, onClose, onBotCrea
         },
       };
 
-      const finalBot = await api.updateBot(created.id, updatedBot);
+      const finalBot = await api.updateBot(targetBotId, updatedBot);
 
       // 3. Save extra FAQs and Knowledge items
       for (const faq of faqs) {

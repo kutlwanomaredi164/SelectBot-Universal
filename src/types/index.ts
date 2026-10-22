@@ -140,6 +140,7 @@ export interface KnowledgeBaseItem {
   tags: string[];
   ingestionStatus: 'ready' | 'processing' | 'error';
   updatedAt: string;
+  createdAt?: string;
   ownerId?: string;
   sourceType?: string;
   storageReference?: string;
